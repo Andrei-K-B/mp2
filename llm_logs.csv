@@ -1,0 +1,122 @@
+I was a little confused trying to get axios so I asked Gemini for an example of retrieving my pokemon from the poke api and used it as a baseline to go off of
+
+---
+
+User
+how would i use axios to get a pokemon's id, name, height, weight, types, and the image from the POkemon API found here? what would be the best way to store it? this is the api im using https://pokeapi.co/
+
+also should this be in it's own file or with the rest of my code if im making like a pokedex app
+
+---
+
+Gemini Response:
+Here's a clean way to do it with PokéAPI.
+
+Fetching the data
+
+The endpoint is https://pokeapi.co/api/v2/pokemon/{name or id}. The response is huge, so you'll want to pick out just the fields you need:
+
+javascript
+import axios from "axios";
+
+export async function getPokemon(nameOrId) {
+  const { data } = await axios.get(
+    `https://pokeapi.co/api/v2/pokemon/${String(nameOrId).toLowerCase()}`
+  );
+
+  return {
+    id: data.id,
+    name: data.name,
+    height: data.height,   // decimetres
+    weight: data.weight,   // hectograms
+    types: data.types.map((t) => t.type.name),
+    image: data.sprites.other["official-artwork"].front_default,
+  };
+}
+
+A few notes:
+
+Units are weird. Height is in decimetres and weight is in hectograms, so divide by 10 to get meters and kilograms when displaying.
+Types come back as an array of objects like { slot: 1, type: { name: "grass", url: "..." } }, so .map flattens it to ["grass", "poison"].
+Image: official-artwork is the high-res art. If you want the small pixel sprite instead, use data.sprites.front_default. Some Pokémon may be missing one, so a fallback is a good idea: data.sprites.other["official-artwork"].front_default ?? data.sprites.front_default.
+Handling errors
+
+A bad name returns a 404, so wrap calls where you use it:
+
+javascript
+try {
+  const pokemon = await getPokemon("pikachu");
+  console.log(pokemon);
+} catch (err) {
+  if (err.response?.status === 404) {
+    console.log("Pokémon not found");
+  } else {
+    console.error("Network or server error", err.message);
+  }
+}
+Best way to store it
+
+It depends on what you're doing, but for a Pokédex app:
+
+1. Store each Pokémon as a plain object (what the function above returns). Keeping only the fields you need is much better than saving the raw response, which is tens of KB per Pokémon.
+
+2. Keep them in a collection keyed by id so lookups are instant:
+
+javascript
+const pokedex = {
+  25: { id: 25, name: "pikachu", ... },
+  1:  { id: 1, name: "bulbasaur", ... },
+};
+
+An object (or Map) keyed by id beats an array when you need to look up by id, and you can still do Object.values(pokedex) when you need a list.
+
+3. Cache so you don't re-fetch. PokéAPI asks people to cache responses, and it makes your app faster:
+
+javascript
+const cache = new Map();
+
+export async function getPokemon(nameOrId) {
+  const key = String(nameOrId).toLowerCase();
+  if (cache.has(key)) return cache.get(key);
+
+  const { data } = await axios.get(`https://pokeapi.co/api/v2/pokemon/${key}`);
+  const pokemon = { /* ...same mapping as above... */ };
+
+  cache.set(key, pokemon);
+  return pokemon;
+}
+
+Where the cache lives depends on your app:
+
+React/state: in component state, or a state library, or something like React Query / TanStack Query, which handles caching for you.
+Persist across sessions (favorites, caught Pokémon): localStorage (store IDs only, then re-fetch or look up from cache).
+Backend app: a database or Redis, if you get that far.
+Separate file or with the rest of your code?
+
+Separate file. Even for a small project, I'd put API calls in their own module, something like:
+
+src/
+  api/
+    pokemon.js      <- axios calls + data shaping
+  components/
+    PokemonCard.jsx
+  App.jsx
+
+Reasons:
+
+One place to change things. If the API URL or response shape changes, you edit one file instead of hunting through components.
+Your UI stays clean. Components just call getPokemon("pikachu") and get a tidy object, without knowing anything about axios or the raw response.
+Easy to reuse and test. You can use it from multiple components, and mock it in tests.
+
+A small bonus is creating a shared axios instance so you don't repeat the base URL:
+
+javascript
+// src/api/pokemon.js
+const api = axios.create({ baseURL: "https://pokeapi.co/api/v2" });
+
+export async function getPokemon(nameOrId) {
+  const { data } = await api.get(`/pokemon/${String(nameOrId).toLowerCase()}`);
+  // ...
+}
+
+If you tell me what framework you're using (React, Vue, plain JS, Node), I can show how to wire it into the UI, including loading and error states.
